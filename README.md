@@ -1,2 +1,2 @@
-# CSAPP-lab
-CSAPP 学习记录
+# CSAPP-Lab
+CSAPP 学习记录（Lab）
