@@ -311,6 +311,10 @@ static int test_function(test_ptr t) {
 	exit(1);
     }
 
+	/* 自己初始化一下，不然编译器会 warning */
+	for (int i = 0; i < 3; i++) {
+		arg_test_range[i] = 0;
+	}
     /* Assign range of argument test vals so as to conserve the total
        number of tests, independent of the number of arguments */
     if (args == 1) {
