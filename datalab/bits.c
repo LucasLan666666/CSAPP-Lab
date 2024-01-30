@@ -288,9 +288,9 @@ int logicalNeg(int x) {
  */
 int howManyBits(int x) {
     // 重点运用二分法思想
-    int pos_x = x ^ (x >> 31); // 获取 x 的正值，这里用的是按位取反的方法（没有 + 1），并非补码
-    int isZero = !pos_x; // 注意 -1 和 0 都能使得 isZero = 1，所以另需引入一个位掩码 notZeroMask 判断
-    int notZeroMask = (!!pos_x << 31) >> 31; // 只有 pos_x 非零的时候，该掩码为 0xFFFFFFFF，否则为 0x0
+    int pos_x = x ^ (x >> 31); // 获取 x 的正值（x 为 -1，-2，-4···的时候，不需要额外补充符号位），这里用的是按位取反的方法，并非补码，巧妙处理了这一细节
+    int isZeroOrNegOne = !pos_x; // 只有 -1 和 0 能使得 isZeroOrNegOne == 1，这两个数特殊，需要单独考虑
+    int notZeroOrNegOneMask = (!!pos_x << 31) >> 31; // 只有 pos_x 不等于 0 或 -1 的时候，该掩码为 0xFFFFFFFF，否则为 0x0
     int bit_16, bit_8, bit_4, bit_2, bit_1;
     int bit_count;
     bit_16 = !!(pos_x >> 16) << 4;
@@ -302,9 +302,8 @@ int howManyBits(int x) {
     bit_2 = !!(pos_x >> 2) << 1;
     pos_x = pos_x >> bit_2;
     bit_1 = !!(pos_x >> 1);
-    bit_count = bit_16 + bit_8 + bit_4 + bit_2 + bit_1 + 2; //at least we need one bit for 1 to tmax,
-    //and we need another bit for sign
-    return isZero | (bit_count & notZeroMask);
+    bit_count = bit_16 + bit_8 + bit_4 + bit_2 + bit_1 + 2; // 1 bit 给少算的一位，1 bit 给符号位
+    return isZeroOrNegOne | (bit_count & notZeroOrNegOneMask); // x 等于 0 或 -1 时算的不对，需要分两种情况讨论
 }
 
 
@@ -321,7 +320,27 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-    return 2;
+    unsigned    s = uf >> 31;
+    unsigned  exp = (uf >> 23) & 0xFF;
+    unsigned frac = (uf << 9) >> 9;
+
+    // 特殊数，原封不动
+    if (exp == 0xFF) {
+        ;
+    }
+    // 非规格化数
+    else if (!exp) {
+        if (frac >> 22) { // 尾数溢出，阶码从 0 变为 1
+            exp = 0x01;
+        }
+        frac = (frac << 10) >> 9; // 通过移位实现 * 2 操作
+    }
+    // 规格化数
+    else {
+        exp = exp + 0x01; // 只需要操作阶码
+    }
+
+    return (s << 31) + (exp << 23) + frac;
 }
 
 
@@ -338,7 +357,29 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-    return 2;
+    // (int)f 是向零舍入
+    unsigned      s = uf >> 31;
+    unsigned    exp = (uf >> 23) & 0xFF;
+    unsigned   frac = (uf << 9) >> 9;
+    unsigned      f = (1 << 23) + frac; // 规格化数真正的小数部分
+    int           E = exp - 127 - 23; // 代表右移的位数
+    int      sign_E = E >> 31; // 全为 1 表示幂为负，全为 0 表示 E 为正
+    unsigned  pos_E = (E ^ sign_E) + (sign_E & 0x01); // 2 的幂取绝对值，方便移位
+    unsigned  pos_r; // 结果的绝对值
+
+    // 非规格化数或很小的规格化数
+    if (!exp || exp < 127) {
+        return 0;
+    }
+    // 特殊数或过大的规格化数，返回 0x80000000u
+    else if (exp == 255 || E > 7) {
+        return 0x01 << 31;
+    }
+    // 规格化数，对于负数要用补码的算法
+    else {
+        pos_r = ~(0x01 << 31) & (sign_E ? (f >> pos_E) : (f << pos_E));
+        return s ? (~pos_r + 0x01) : pos_r;
+    }
 }
 
 
@@ -356,5 +397,27 @@ int floatFloat2Int(unsigned uf) {
  *   Rating: 4
  */
 unsigned floatPower2(int x) {
-    return 2;
+    /**
+     * 只考虑 2 的幂：
+     * float 类型所能表示的最小非规格化数是 0 00000000 00000000000000000000001  -> 2^(-23) * 2^(-126) = 2^(-149)
+     * float 类型所能表示的最大非规格化数是 0 00000000 10000000000000000000000  -> 2^(-1) * 2^(-126) = 2^(-127)
+     * float 类型所能表示的最小规格化数是   0 00000001 00000000000000000000000  -> 2^0 * 2^(1 - 127) = 2^(-126)
+     * float 类型所能表示的最大规格化数是   0 11111110 00000000000000000000000  -> 2^0 * 2^(254 - 127) = 2^127
+     */
+    // 太小了
+    if (x < -149) {
+        return 0;
+    }
+    // 非规格化数
+    else if (x >= -149 && x <=-127) {
+        return 0x01 << (x + 149);
+    }
+    // 规格化数
+    else if (x >= -126 && x <= 127) {
+        return (x + 127) << 23;
+    }
+    // 太大了
+    else {
+        return 0xFF << 23;
+    }
 }
